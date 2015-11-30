@@ -1,0 +1,166 @@
+import Data.Maybe
+
+type Identifier = String
+
+type FunctionName = String
+
+data BinOp = EQU| GRT | ADD | MUL
+        deriving (Eq,Show)
+        
+data Expr = Val Int| Id Identifier | If Expr Expr Expr |
+            OpApp BinOp Expr Expr| FunApp FunctionName [Expr]
+            deriving (Eq,Show)
+            
+type Definition = ([Identifier],Expr)
+
+type Function = (FunctionName, Definition)
+
+type Defs = [Function]
+
+type Environment = [(Identifier, Int)]
+
+type Program = ([Function], Expr)
+
+----------------
+--Examples of functions
+
+-- Identity function
+-- Haskell equivalent : ident n = n 
+ident :: Function
+ident
+  = ("ident", 
+    (["n"], Id "n")
+    )
+
+-- Maximum of two numbers
+-- Haskell equivalent : max2 a b = if a>b then a else b
+max2 :: Function
+max2 
+  = ("max2", (["a","b"] , 
+               (If (OpApp GRT (Id "a") (Id "b"))
+                     (Id "a")
+                     (Id "b")
+               )
+              )
+    )
+    
+-- Factorial
+-- Haskell equivalent : fact x = if x==0 then 1 else x * fact (x-1)
+fact :: Function
+fact
+  = ("fact", (["x"],
+               (If (OpApp EQU (Id "x") (Val 0))
+                   (Val 1)
+                   (OpApp MUL (Id "x")
+                              (FunApp "fact" 
+                                [OpApp ADD (Id "x") (Val (-1))]
+                              )  
+                   )
+                )     
+             )
+    )
+----------------
+
+----------------
+-- Examples programs
+
+eg1, eg2, eg3, eg4, eg5 :: Program
+-- When evaluated should give 15,120,6,5,120 respectively
+
+-- max2 12 15
+eg1 
+  = ([max2], FunApp "max2" [Val 12, Val 15]) 
+
+-- fact (max2 5 3)
+eg2 
+  = ([max2, fact], FunApp "fact" [FunApp "max2" [Val 5, Val 3]])
+  
+-- 4+2  
+eg3
+  = ([], OpApp ADD (Val 4) (Val 2))
+
+-- ident 5
+eg4
+  = ([ident], FunApp "ident" [Val 5])
+  
+-- max2 (ident 100) (fact 5)
+eg5
+  = ([ident,fact,max2],
+    FunApp "max2" [FunApp "ident" [Val 100], FunApp "fact" [Val 5]])
+
+----------------
+
+search :: Eq a => a -> [(a,b)] -> b
+-- Pre : at least one binding for a in the list
+search x xs
+  = fromJust (lookup x xs)
+  
+arity :: Function -> (FunctionName, Int)
+arity (fn,(args,exp)) 
+  = (fn, length args)
+  
+arities :: [Function] -> [(FunctionName, Int)]
+arities xs 
+  = map arity xs
+  
+applyBinOp :: BinOp -> Int -> Int -> Int
+applyBinOp EQU x y
+  | x==y =1
+  | otherwise = 0
+
+applyBinOp GRT x y
+  | x>y=1
+  | otherwise = 0
+  
+applyBinOp ADD x y 
+  = x+y
+
+applyBinOp MUL x y
+  = x*y
+  
+eval :: Expr -> Environment -> Defs -> Int
+eval (Val x) _ _
+  = x
+  
+eval (Id s) e _
+  = search s e
+  
+eval (If p q r) e ds
+  | (eval p e ds == 1) = eval q e ds
+  | otherwise = eval r e ds
+   
+eval (OpApp op e1 e2) e ds
+  = applyBinOp op (eval e1 e ds) (eval e2 e ds)
+
+eval (FunApp f args) e ds
+  = eval rhs ((zip as vs)++e) ds
+  where 
+   vs = map eval2 args
+   (as,rhs) = search f ds
+   eval2 expr = eval expr e ds
+
+runProgram :: Program -> Int
+-- pre: the program is well formed.
+runProgram (funcs,expr)
+  = eval expr [] funcs
+  
+maybeRunProgram :: Program -> Maybe Int
+-- pre : the program may contain partial applications but is otherwise well formed
+maybeRunProgram (funcs,ys)
+  | isValid ys = Just (runProgram (funcs, ys))
+  | otherwise = Nothing
+  where
+   isValid :: Expr-> Bool
+   isValid (If e1 e2 e3)
+    = and (map isValid [e1,e2,e3])
+   isValid (OpApp op e1 e2)
+    = and (map isValid [e1,e2])
+   isValid (Id _)
+    = True
+   isValid (Val _)
+    = True
+   isValid (FunApp f args)
+    = expected == length (args) && and (map isValid args) 
+     where
+      expected = search f (arities funcs)
+      
